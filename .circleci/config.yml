@@ -10,47 +10,57 @@ jobs:
   checkout_code:
     executor: docker-executor
     steps:
+      - run:
+          name: Install Git
+          command: apt-get update && apt-get install -y git # <-- Install git before checkout
       - checkout
 
   build_docker_image:
     executor: docker-executor
     steps:
+      - run:
+          name: Install Dependencies
+          command: |
+            apt-get update
+            apt-get install -y git docker-ce-cli # <-- Install git and docker client
       - checkout
       - setup_remote_docker
       - run:
-          name: Authenticate with google cloud
+          name: Authenticate with Google Cloud
           command: |
-              echo "$GCLOUD_SERVICE_KEY" | base64 --decode > gcp-key.json
-              gcloud auth activate-service-account --key-file=gcp-key.json
-              gcloud auth configure-docker us-central1-docker.pkg.dev || gcloud auth configure-docker
-
+            echo "$GCLOUD_SERVICE_KEY" | base64 --decode > gcp-key.json
+            gcloud auth activate-service-account --key-file=gcp-key.json
+            gcloud auth configure-docker us-central1-docker.pkg.dev
       - run:
           name: Build and Push Image
           command: |
-              docker build -t us-central1-docker.pkg.dev/$GOOGLE_PROJECT_ID/llmops-repo/llmops-app:latest .
-              docker push us-central1-docker.pkg.dev/$GOOGLE_PROJECT_ID/llmops-repo/llmops-app:latest
+            docker build -t us-central1-docker.pkg.dev/$GOOGLE_PROJECT_ID/llmops-repo/llmops-app:latest .
+            docker push us-central1-docker.pkg.dev/$GOOGLE_PROJECT_ID/llmops-repo/llmops-app:latest
 
   deploy_to_gke:
     executor: docker-executor
     steps:
-      - checkout
-      - setup_remote_docker
       - run:
-          name: Authenticate with google cloud
+          name: Install Git and Kubectl
           command: |
-              echo "$GCLOUD_SERVICE_KEY" | base64 --decode > gcp-key.json
-              gcloud auth activate-service-account --key-file=gcp-key.json
-              gcloud auth configure-docker us-central1-docker.pkg.dev || gcloud auth configure-docker
-      
+            apt-get update
+            apt-get install -y git gettext # <-- Install git and gettext for envsubst
+      - checkout
+      - run:
+          name: Authenticate with Google Cloud
+          command: |
+            echo "$GCLOUD_SERVICE_KEY" | base64 --decode > gcp-key.json
+            gcloud auth activate-service-account --key-file=gcp-key.json
       - run:
           name: Configure GKE
           command: |
-              gcloud container clusters get-credentials $GKE_CLUSTER --region $GOOGLE_COMPUTE_REGION --project $GOOGLE_PROJECT_ID
+            gcloud container clusters get-credentials $GKE_CLUSTER --region $GOOGLE_COMPUTE_REGION --project $GOOGLE_PROJECT_ID
       - run:
           name: Deploy to GKE
           command: |
-              kubectl apply -f kubernetes-deployment.yaml --validate=false
-              kubectl rollout restart deployment llmops-app
+            # Using envsubst is a safer way to handle variables in Kubernetes manifests
+            envsubst < kubernetes-deployment.yaml | kubectl apply -f -
+            kubectl rollout restart deployment llmops-app
 
 workflows:
   version: 2
@@ -63,8 +73,3 @@ workflows:
       - deploy_to_gke:
           requires:
             - build_docker_image
-
-    
-
-
-
