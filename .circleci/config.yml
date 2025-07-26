@@ -12,17 +12,33 @@ jobs:
     steps:
       - run:
           name: Install Git
-          command: apt-get update && apt-get install -y git # <-- Install git before checkout
+          command: apt-get update && apt-get install -y git
       - checkout
 
   build_docker_image:
     executor: docker-executor
     steps:
       - run:
-          name: Install Dependencies
+          name: Install Git & Docker Client
           command: |
+            # Update and install prerequisites
             apt-get update
-            apt-get install -y git docker-ce-cli # <-- Install git and docker client
+            apt-get install -y ca-certificates curl gnupg git
+
+            # Add Docker's official GPG key to ensure package authenticity
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+            chmod a+r /etc/apt/keyrings/docker.asc
+
+            # Add the Docker repository to Apt sources
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+              $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+              tee /etc/apt/sources.list.d/docker.list > /dev/null
+            
+            # Update apt again with the new repo and install Docker Client
+            apt-get update
+            apt-get install -y docker-ce-cli
       - checkout
       - setup_remote_docker
       - run:
@@ -41,10 +57,8 @@ jobs:
     executor: docker-executor
     steps:
       - run:
-          name: Install Git and Kubectl
-          command: |
-            apt-get update
-            apt-get install -y git gettext # <-- Install git and gettext for envsubst
+          name: Install Git
+          command: apt-get update && apt-get install -y git
       - checkout
       - run:
           name: Authenticate with Google Cloud
@@ -57,10 +71,7 @@ jobs:
             gcloud container clusters get-credentials $GKE_CLUSTER --region $GOOGLE_COMPUTE_REGION --project $GOOGLE_PROJECT_ID
       - run:
           name: Deploy to GKE
-          command: |
-            # Using envsubst is a safer way to handle variables in Kubernetes manifests
-            envsubst < kubernetes-deployment.yaml | kubectl apply -f -
-            kubectl rollout restart deployment llmops-app
+          command: kubectl apply -f kubernetes-deployment.yaml && kubectl rollout restart deployment llmops-app
 
 workflows:
   version: 2
